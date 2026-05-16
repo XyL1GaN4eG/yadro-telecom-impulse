@@ -3,19 +3,20 @@ package handler
 import (
 	"errors"
 	"impulse/internal/event"
+	"impulse/internal/game"
 	"impulse/internal/parser"
 	"impulse/internal/player"
 	"strconv"
 )
 
-func HandleCommand(cmd event.Command, cfg app.GameConfig) (err error) {
+func HandleCommand(cmd event.Command) (err error) {
 	switch cmd.EventID {
 	case 1:
 		_, err = registerPlayer(cmd)
 	case 2:
 		_, err = enterToDungeon(cmd)
 	case 3:
-		_, err = killEnemy(cmd, cfg)
+		_, err = killEnemy(cmd)
 	case 4:
 	case 10:
 		_, err = heal(cmd)
@@ -35,13 +36,31 @@ func registerPlayer(cmd event.Command) (p player.Player, err error) {
 		p = player.Player{
 			ID:             cmd.PlayerID,
 			Health:         player.DefaultHealth,
+			Level:          0,
 			IsDisqualified: false,
+			Dungeon:        newDungeonRun(game.Cfg.Floors, game.Cfg.Monsters),
 		}
 		player.Players[cmd.PlayerID] = p
 		return
 	}
 	err = errors.New("player already register")
 	return player.Player{}, err
+}
+
+func newDungeonRun(floorsCount, monstersCount uint8) player.DungeonRun {
+	floors := make([]player.Floor, int(floorsCount))
+
+	for i := range floors {
+		floors[i] = player.Floor{
+			MonstersLeft: monstersCount,
+			Cleared:      false,
+		}
+	}
+
+	return player.DungeonRun{
+		Floors:     floors,
+		BossKilled: false,
+	}
 }
 
 func enterToDungeon(cmd event.Command) (p player.Player, err error) {
@@ -55,7 +74,7 @@ func enterToDungeon(cmd event.Command) (p player.Player, err error) {
 	return p, nil
 }
 
-func killEnemy(cmd event.Command, cfg app.GameConfig) (p player.Player, err error) {
+func killEnemy(cmd event.Command) (p player.Player, err error) {
 	p, err = findLivePlayer(cmd.PlayerID)
 	if err != nil {
 		return p, err

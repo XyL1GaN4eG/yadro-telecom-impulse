@@ -1,9 +1,10 @@
 package dungeon
 
-type Dungeon struct {
-	Floor []Floor
-}
+import "time"
 
-type Floor struct {
-	Monsters uint
+type Config struct {
+	Floors   uint8
+	Monsters uint8
+	OpenAt   time.Time
+	Duration time.Duration
 }
