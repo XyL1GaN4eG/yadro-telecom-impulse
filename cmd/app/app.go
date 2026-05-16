@@ -113,13 +113,9 @@ func handleCommand(cmd command) (err error) {
 	return
 }
 
-func isPlayerExists(id uint8) bool {
-	_, ok := players[id]
-	return ok
-}
-
 func registerPlayer(cmd command) (player Player, err error) {
-	if !isPlayerExists(cmd.playerID) {
+	_, ok := players[cmd.playerID]
+	if !ok {
 		player = Player{
 			id:             cmd.playerID,
 			health:         defaultHealth,
@@ -138,6 +134,16 @@ func enterToDungeon(cmd command) (player Player, err error) {
 		return Player{}, errors.New("player don't register yet")
 	}
 	player.level = 1
+	return player, nil
+}
+
+func kill(cmd command) (player Player, err error) {
+	player, ok := players[cmd.playerID]
+	if !ok {
+		return Player{}, errors.New("player=" + string(cmd.playerID) + "wasn't found")
+	}
+	player.health = 0
+	players[cmd.playerID] = player
 	return player, nil
 }
 
