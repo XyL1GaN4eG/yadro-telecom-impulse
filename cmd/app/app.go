@@ -2,32 +2,31 @@ package app
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
-	outfmt "impulse/internal/format"
-	"impulse/internal/game"
-	"impulse/internal/handler"
 	"impulse/internal/parser"
-	"impulse/internal/player"
+	"impulse/internal/replay"
+	"impulse/internal/tui"
 	"log"
 	"os"
 )
 
 func Run() {
 	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "tui" {
+		if err := tui.Run(args[1:]); err != nil {
+			log.Panic(err)
+		}
+		return
+	}
+
 	var path string
 	if len(args) != 0 {
 		path = args[0]
 	} else {
 		path = "docs/config.json"
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if err := replay.LoadConfig(path); err != nil {
 		log.Panic(err)
-	}
-	if err := json.Unmarshal(data, &game.Cfg); err != nil {
-		panic("Error parsing JSON:" + string(err.Error()))
-		return
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -40,21 +39,8 @@ func Run() {
 			continue
 		}
 
-		p, err := handler.HandleCommand(cmd)
-		if err != nil {
-			if cmd.EventID >= 4 && cmd.EventID <= 7 {
-				fmt.Println(outfmt.ImpossibleMove(cmd))
-			}
-			continue
-		}
-
-		if p.Status == player.StatusDisqual {
-			fmt.Println(outfmt.Disqualified(cmd))
-			continue
-		}
-		fmt.Println(outfmt.Command(cmd))
-		if cmd.EventID == 11 && p.Health == 0 {
-			fmt.Println(outfmt.Dead(cmd))
+		for _, line := range replay.ProcessCommand(cmd) {
+			fmt.Println(line)
 		}
 	}
 }
