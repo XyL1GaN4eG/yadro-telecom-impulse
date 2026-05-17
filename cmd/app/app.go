@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	outfmt "impulse/internal/format"
 	"impulse/internal/game"
 	"impulse/internal/handler"
 	"impulse/internal/parser"
+	"impulse/internal/player"
 	"log"
 	"os"
 )
@@ -28,7 +30,6 @@ func Run() {
 		return
 	}
 
-	fmt.Printf("%v\n", game.Cfg)
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -36,7 +37,24 @@ func Run() {
 		cmd, err := parser.Split(line)
 		if err != nil {
 			log.Println(err)
+			continue
 		}
-		_, err = handler.HandleCommand(cmd)
+
+		p, err := handler.HandleCommand(cmd)
+		if err != nil {
+			if cmd.EventID >= 4 && cmd.EventID <= 7 {
+				fmt.Println(outfmt.ImpossibleMove(cmd))
+			}
+			continue
+		}
+
+		if p.Status == player.StatusDisqual {
+			fmt.Println(outfmt.Disqualified(cmd))
+			continue
+		}
+		fmt.Println(outfmt.Command(cmd))
+		if cmd.EventID == 11 && p.Health == 0 {
+			fmt.Println(outfmt.Dead(cmd))
+		}
 	}
 }

@@ -18,6 +18,6 @@ func Print(msg string) error {
 }
 
 func PrintError(err error) error {
-	_, err = fmt.Fprintln(os.Stderr, err)
-	return err
+	_, printErr := fmt.Fprintln(os.Stderr, err)
+	return printErr
 }
