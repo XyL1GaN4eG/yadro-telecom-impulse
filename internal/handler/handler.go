@@ -19,17 +19,30 @@ func HandleCommand(cmd event.Command) (p player.Player, err error) {
 		}
 		log.Printf("Игрок %v зарегистрирован\n", p.ID)
 	case 2:
-		_, err = enterToDungeon(cmd)
+		p, err = enterToDungeon(cmd)
 		if err != nil {
+		} else {
+			log.Printf("Игрок %v вошел в подземелье", p.ID)
 		}
-		log.Printf("Игрок %v вошел в подземелье", p.ID)
 	case 3:
-		_, err = killEnemy(cmd)
-		log.Printf("Игрок %v убил монстра", p.ID)
+		p, err = killEnemy(cmd)
+		if err != nil {
+
+		} else {
+			log.Printf("Игрок %v убил монстра", p.ID)
+		}
 	case 4:
-		log.Printf("Игрок %v перешел на следующий этаж", p.ID)
+		p, err = moveToNextFloor(cmd)
+		if err != nil {
+		} else {
+			log.Printf("Игрок %v перешел на следующий этаж", p.ID)
+		}
 	case 5:
-		log.Printf("Игрок %v перешел на предыдущий этаж", p.ID)
+		p, err = moveToPrevFloor(cmd)
+		if err != nil {
+		} else {
+			log.Printf("Игрок %v перешел на предыдущий этаж", p.ID)
+		}
 	case 6:
 		log.Printf("Игрок %v вошел на этаж босса", p.ID)
 	case 7:
@@ -50,37 +63,19 @@ func HandleCommand(cmd event.Command) (p player.Player, err error) {
 	return
 }
 
-func registerPlayer(cmd event.Command) (p player.Player, err error) {
-	_, ok := player.Players[cmd.PlayerID]
-	if !ok {
-		p = player.Player{
-			ID:             cmd.PlayerID,
-			Health:         player.DefaultHealth,
-			Level:          0,
-			IsDisqualified: false,
-			Dungeon:        newDungeonRun(game.Cfg.Floors, game.Cfg.Monsters),
-		}
-		player.Players[cmd.PlayerID] = p
-		return
-	}
-	err = errors.New("player already register")
-	return player.Player{}, err
-}
-
-func newDungeonRun(floorsCount, monstersCount uint8) player.DungeonRun {
-	floors := make([]player.Floor, int(floorsCount))
-
-	for i := range floors {
-		floors[i] = player.Floor{
-			MonstersLeft: monstersCount,
-			Cleared:      false,
-		}
+func registerPlayer(cmd event.Command) (player.Player, error) {
+	if _, ok := player.Players[cmd.PlayerID]; ok {
+		return player.Player{}, errors.New("player already register")
 	}
 
-	return player.DungeonRun{
-		Floors:     floors,
-		BossKilled: false,
-	}
+	p := player.New(
+		cmd.PlayerID,
+		game.Cfg.Floors,
+		game.Cfg.Monsters,
+	)
+
+	player.Players[cmd.PlayerID] = p
+	return p, nil
 }
 
 func enterToDungeon(cmd event.Command) (p player.Player, err error) {
@@ -89,7 +84,7 @@ func enterToDungeon(cmd event.Command) (p player.Player, err error) {
 		return p, err
 	}
 
-	p.Level = 1
+	p.Floor = 1
 	player.Players[cmd.PlayerID] = p
 	return p, nil
 }
@@ -101,6 +96,34 @@ func killEnemy(cmd event.Command) (p player.Player, err error) {
 	}
 
 	return
+}
+
+func moveToNextFloor(cmd event.Command) (p player.Player, err error) {
+	p, err = findLivePlayer(cmd.PlayerID)
+	if err != nil {
+		return player.Player{}, err
+	}
+	if p.Floor < uint8(len(p.Dungeon.Floors)) {
+		p.Floor++
+		player.Players[p.ID] = p
+		return p, nil
+	}
+
+	return p, errors.New("person already on a last level")
+}
+
+func moveToPrevFloor(cmd event.Command) (p player.Player, err error) {
+	p, err = findLivePlayer(cmd.PlayerID)
+	if err != nil {
+		return player.Player{}, err
+	}
+	if !(p.Floor < 1) {
+		p.Floor--
+		player.Players[p.ID] = p
+		return p, nil
+	}
+
+	return p, errors.New("person already on a first level")
 }
 
 func heal(cmd event.Command) (p player.Player, err error) {
