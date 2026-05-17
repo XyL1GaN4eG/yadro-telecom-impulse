@@ -1,11 +1,15 @@
-# Impulse
+# Dungeon Challenge Event Processor
 
-Impulse is a Go prototype for processing a dungeon challenge event stream.
-It reads a JSON configuration, consumes chronological events from standard input,
-updates each player's dungeon run, prints the normalized outgoing event log, and
-emits the final report.
+This repository is a Go prototype for processing a dungeon challenge event
+stream. It reads a JSON configuration, consumes chronological events from
+standard input, updates each player's dungeon run, prints the normalized
+outgoing event log, and emits the final report.
+![Event replay](docs/assets/impulse-replay.gif)
 
-![Impulse event replay](docs/assets/impulse-replay.gif)
+[I also added a polished TUI interface on top of the core task.](https://github.com/XyL1GaN4eG/yadro-telecom-impulse/tree/implement-bubbletea)
+
+![TUI demo](docs/assets/impulse-tui.gif)
+
 
 ## What It Models
 
@@ -89,19 +93,19 @@ Output:
 
 ## Event Reference
 
-| ID | Input meaning | Handler behavior |
-| ---: | --- | --- |
-| 1 | Register player | Creates a player with 100 HP, status `FAIL`, floor `0`, and a dungeon run from config |
-| 2 | Enter dungeon | Requires registration; otherwise emits disqualification |
-| 3 | Kill monster | Decrements monsters on the current non-boss floor and clears it at zero |
-| 4 | Next floor | Requires the current floor to be cleared; entering the boss floor also emits event `6` |
-| 5 | Previous floor | Requires a live player in the dungeon and a floor above `0` |
-| 6 | Enter boss floor | Requires the current floor to be the boss floor; duplicate notifications are ignored |
-| 7 | Kill boss | Requires boss floor entry; marks status `SUCCESS` |
-| 8 | Leave dungeon | Marks the live player as finished |
-| 9 | Cannot continue | Marks player as `DISQUAL` and finished |
-| 10 | Heal | Adds health, capped at `100` |
-| 11 | Damage | Subtracts health; at `0` HP marks status `FAIL` and emits death |
+| ID | Input meaning    | Handler behavior                                                                       |
+|---:|------------------|----------------------------------------------------------------------------------------|
+|  1 | Register player  | Creates a player with 100 HP, status `FAIL`, floor `0`, and a dungeon run from config  |
+|  2 | Enter dungeon    | Requires registration; otherwise emits disqualification                                |
+|  3 | Kill monster     | Decrements monsters on the current non-boss floor and clears it at zero                |
+|  4 | Next floor       | Requires the current floor to be cleared; entering the boss floor also emits event `6` |
+|  5 | Previous floor   | Requires a live player in the dungeon and a floor above `0`                            |
+|  6 | Enter boss floor | Requires the current floor to be the boss floor; duplicate notifications are ignored   |
+|  7 | Kill boss        | Requires boss floor entry; marks status `SUCCESS`                                      |
+|  8 | Leave dungeon    | Marks the live player as finished                                                      |
+|  9 | Cannot continue  | Marks player as `DISQUAL` and finished                                                 |
+| 10 | Heal             | Adds health, capped at `100`                                                           |
+| 11 | Damage           | Subtracts health; at `0` HP marks status `FAIL` and emits death                        |
 
 Invalid floor actions in `4..7` are rejected as:
 
@@ -127,12 +131,12 @@ The binary accepts an optional config path. Without an argument it reads
 
 Current implementation notes:
 
-| Field | Used by current code |
-| --- | --- |
-| `Floors` | Builds the dungeon, where the last floor is the boss floor |
-| `Monsters` | Sets monster count for each non-boss floor |
-| `OpenAt` | Defines the dungeon opening time used for close-time calculation |
-| `Duration` | Closes active runs at `OpenAt + Duration` hours |
+| Field      | Used by current code                                             |
+|------------|------------------------------------------------------------------|
+| `Floors`   | Builds the dungeon, where the last floor is the boss floor       |
+| `Monsters` | Sets monster count for each non-boss floor                       |
+| `OpenAt`   | Defines the dungeon opening time used for close-time calculation |
+| `Duration` | Closes active runs at `OpenAt + Duration` hours                  |
 
 ## Final Report
 
@@ -186,19 +190,3 @@ docs                 Contract, sample config, sample events
 docs/vhs             VHS tapes and prompt setup for reproducible terminal GIFs
 docs/assets          Generated README GIFs
 ```
-
-## Regenerate The GIFs
-
-The terminal animations are generated with
-[Charm VHS](https://github.com/charmbracelet/vhs). VHS records terminal GIFs from
-code-like `.tape` files and requires `vhs`, `ttyd`, and `ffmpeg` on `PATH`.
-
-```bash
-brew install vhs
-vhs docs/vhs/replay.tape
-vhs docs/vhs/tests.tape
-```
-
-The tapes run under `fish` and source [docs/vhs/prompt.fish](docs/vhs/prompt.fish)
-so the recordings keep the Starship prompt visible instead of collapsing to a
-transient prompt.
