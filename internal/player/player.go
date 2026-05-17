@@ -22,7 +22,8 @@ type Player struct {
 }
 
 type DungeonRun struct {
-	Floors []Floor
+	Floors           []Floor
+	BossFloorEntered bool
 }
 
 type Floor struct {
@@ -60,7 +61,8 @@ func NewDungeonRun(floorsCount, monstersPerFloor uint8) DungeonRun {
 	}
 
 	return DungeonRun{
-		Floors: floors,
+		Floors:           floors,
+		BossFloorEntered: false,
 	}
 }
 
