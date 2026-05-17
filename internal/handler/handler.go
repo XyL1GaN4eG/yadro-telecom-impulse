@@ -95,10 +95,14 @@ func registerPlayer(cmd event.Command) (player.Player, error) {
 }
 
 func enterToDungeon(cmd event.Command) (p player.Player, err error) {
-	p, err = findLivePlayer(cmd.PlayerID)
-	if err != nil {
-		return p, err
+	p, ok := player.Players[cmd.PlayerID]
+	if !ok {
+		return disqualifyPlayer(cmd.PlayerID), nil
 	}
+	if p.Health <= 0 {
+		return player.Player{}, errors.New("player is dead")
+	}
+
 	if p.EnteredDungeon {
 		return player.Player{}, errors.New("player already entered dungeon")
 	}
@@ -115,6 +119,24 @@ func killEnemy(cmd event.Command) (p player.Player, err error) {
 		return p, err
 	}
 
+	if int(p.Floor) >= len(p.Dungeon.Floors) {
+		return player.Player{}, errors.New("incorrect floor")
+	}
+
+	currentFloor := &p.Dungeon.Floors[p.Floor]
+	if currentFloor.IsBoss {
+		return p, errors.New("boss floor doesn't have monsters")
+	}
+	if currentFloor.MonstersLeft == 0 {
+		err = errors.New("you don't have any monsters")
+		return p, err
+	}
+
+	currentFloor.MonstersLeft--
+	if currentFloor.MonstersLeft == 0 {
+		currentFloor.Cleared = true
+	}
+	player.Players[p.ID] = p
 	return
 }
 
@@ -124,17 +146,23 @@ func moveToNextFloor(cmd event.Command) (p player.Player, err error) {
 		return player.Player{}, err
 	}
 
+	if int(p.Floor) >= len(p.Dungeon.Floors) {
+		return player.Player{}, errors.New("incorrect floor")
+	}
+
 	if !p.Dungeon.Floors[p.Floor].Cleared {
 		err = errors.New("floor isn't cleared")
 		return player.Player{}, err
 	}
-	if p.Floor < uint8(len(p.Dungeon.Floors)) {
-		p.Floor++
-		player.Players[p.ID] = p
-		return p, nil
+
+	nextFloor := int(p.Floor) + 1
+	if nextFloor >= len(p.Dungeon.Floors) {
+		return p, errors.New("person already on a last level")
 	}
 
-	return p, errors.New("person already on a last level")
+	p.Floor = uint8(nextFloor)
+	player.Players[p.ID] = p
+	return p, nil
 }
 
 func moveToPrevFloor(cmd event.Command) (p player.Player, err error) {
@@ -142,7 +170,7 @@ func moveToPrevFloor(cmd event.Command) (p player.Player, err error) {
 	if err != nil {
 		return player.Player{}, err
 	}
-	if p.Floor <= 0 {
+	if p.Floor > 0 {
 		p.Floor--
 		player.Players[p.ID] = p
 		return p, nil
@@ -155,6 +183,9 @@ func enterBossLevel(cmd event.Command) (player.Player, error) {
 	p, err := findLivePlayer(cmd.PlayerID)
 	if err != nil {
 		return player.Player{}, err
+	}
+	if int(p.Floor) >= len(p.Dungeon.Floors) {
+		return player.Player{}, errors.New("incorrect floor")
 	}
 	if !p.Dungeon.Floors[p.Floor].IsBoss {
 		return player.Player{}, errors.New("floor isn't boss")
@@ -170,13 +201,20 @@ func killBoss(cmd event.Command) (p player.Player, err error) {
 	if err != nil {
 		return player.Player{}, err
 	}
-	if p.Dungeon.Floors[p.Floor].IsBoss && p.Dungeon.BossFloorEntered {
-		p.Status = player.StatusSuccess
-		player.Players[p.ID] = p
-	} else {
-		err = errors.New("floor isn't boss")
+	if int(p.Floor) >= len(p.Dungeon.Floors) {
+		return player.Player{}, errors.New("incorrect floor")
 	}
-	return p, err
+	if !p.Dungeon.Floors[p.Floor].IsBoss {
+		return p, errors.New("floor isn't boss")
+	}
+	if !p.Dungeon.BossFloorEntered {
+		return p, errors.New("boss floor wasn't entered")
+	}
+
+	p.Status = player.StatusSuccess
+	p.Dungeon.Floors[p.Floor].Cleared = true
+	player.Players[p.ID] = p
+	return p, nil
 }
 
 func heal(cmd event.Command) (p player.Player, err error) {
@@ -190,7 +228,11 @@ func heal(cmd event.Command) (p player.Player, err error) {
 		err = errors.New("failed to parse health")
 		return
 	}
-	p.Health += health
+	newHealth := int(p.Health) + int(health)
+	if newHealth > int(player.MaxHealth) {
+		newHealth = int(player.MaxHealth)
+	}
+	p.Health = uint8(newHealth)
 	player.Players[cmd.PlayerID] = p
 	return
 }
@@ -208,6 +250,7 @@ func damage(cmd event.Command) (p player.Player, err error) {
 	}
 	if p.Health <= damage {
 		p.Health = 0
+		p.Status = player.StatusFail
 	} else {
 		p.Health -= damage
 	}
@@ -216,19 +259,32 @@ func damage(cmd event.Command) (p player.Player, err error) {
 }
 
 func killPlayer(cmd event.Command) (p player.Player, err error) {
-	p, ok := player.Players[cmd.PlayerID]
-	if !ok {
+	p, err = findLivePlayer(cmd.PlayerID)
+	if err != nil {
 		return player.Player{}, errors.New("player=" + strconv.Itoa(int(cmd.PlayerID)) + "wasn't found")
 	}
 	p.Health = 0
+	p.Status = player.StatusFail
 	player.Players[cmd.PlayerID] = p
 	return p, nil
 }
 
 func findLivePlayer(playerID uint8) (player.Player, error) {
 	p, ok := player.Players[playerID]
-	if !ok || p.Health <= 1 {
-		return p, errors.New("person not registered yet or already dead")
+	if !ok || p.Health == 0 || p.Status == player.StatusDisqual || !p.EnteredDungeon {
+		return p, errors.New("person not registered yet or not alive or not entered dungeon")
 	}
 	return p, nil
+}
+
+func disqualifyPlayer(playerID uint8) player.Player {
+	p := player.New(
+		playerID,
+		game.Cfg.Floors,
+		game.Cfg.Monsters,
+	)
+	p.Status = player.StatusDisqual
+	p.Finished = true
+	player.Players[playerID] = p
+	return p
 }
