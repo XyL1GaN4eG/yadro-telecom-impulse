@@ -63,10 +63,9 @@ func HandleCommand(cmd event.Command) (p player.Player, err error) {
 			log.Printf("Игрок %v убил босса", p.ID)
 		}
 	case 8:
-
-		log.Printf("Игрок %v покинул подземелье", p.ID)
+		p, err = leaveDungeon(cmd)
 	case 9:
-		log.Printf("Игрок %v не может продолжать из-за [%s]", p.ID, cmd.Arg)
+		p, err = cannotContinue(cmd)
 	case 10:
 		_, err = heal(cmd)
 	case 11:
@@ -213,6 +212,27 @@ func killBoss(cmd event.Command) (p player.Player, err error) {
 
 	p.Status = player.StatusSuccess
 	p.Dungeon.Floors[p.Floor].Cleared = true
+	player.Players[p.ID] = p
+	return p, nil
+}
+
+func leaveDungeon(cmd event.Command) (player.Player, error) {
+	p, err := findLivePlayer(cmd.PlayerID)
+	if err != nil {
+		return player.Player{}, err
+	}
+	p.Finished = true
+	player.Players[p.ID] = p
+	return p, nil
+}
+
+func cannotContinue(cmd event.Command) (player.Player, error) {
+	p, ok := player.Players[cmd.PlayerID]
+	if !ok {
+		return disqualifyPlayer(cmd.PlayerID), nil
+	}
+	p.Status = player.StatusDisqual
+	p.Finished = true
 	player.Players[p.ID] = p
 	return p, nil
 }
