@@ -16,38 +16,54 @@ func HandleCommand(cmd event.Command) (p player.Player, err error) {
 		p, err = registerPlayer(cmd)
 		if err != nil {
 			log.Println(err)
+		} else {
+			log.Printf("Игрок %v зарегистрирован\n", p.ID)
 		}
-		log.Printf("Игрок %v зарегистрирован\n", p.ID)
 	case 2:
 		p, err = enterToDungeon(cmd)
 		if err != nil {
+			log.Println(err)
 		} else {
 			log.Printf("Игрок %v вошел в подземелье", p.ID)
 		}
 	case 3:
 		p, err = killEnemy(cmd)
 		if err != nil {
-
+			log.Println(err)
 		} else {
 			log.Printf("Игрок %v убил монстра", p.ID)
 		}
 	case 4:
 		p, err = moveToNextFloor(cmd)
 		if err != nil {
+			log.Println(err)
 		} else {
 			log.Printf("Игрок %v перешел на следующий этаж", p.ID)
 		}
 	case 5:
 		p, err = moveToPrevFloor(cmd)
 		if err != nil {
+			log.Println(err)
 		} else {
 			log.Printf("Игрок %v перешел на предыдущий этаж", p.ID)
 		}
 	case 6:
-		log.Printf("Игрок %v вошел на этаж босса", p.ID)
+		p, err = enterBossLevel(cmd)
+		if err != nil {
+			log.Println(err)
+		} else {
+			log.Printf("Игрок %v вошел на этаж босса", p.ID)
+		}
+
 	case 7:
-		log.Printf("Игрок %v убил босса", p.ID)
+		p, err := killBoss(cmd)
+		if err != nil {
+			log.Println(err)
+		} else {
+			log.Printf("Игрок %v убил босса", p.ID)
+		}
 	case 8:
+
 		log.Printf("Игрок %v покинул подземелье", p.ID)
 	case 9:
 		log.Printf("Игрок %v не может продолжать из-за [%s]", p.ID, cmd.Arg)
@@ -83,8 +99,12 @@ func enterToDungeon(cmd event.Command) (p player.Player, err error) {
 	if err != nil {
 		return p, err
 	}
+	if p.EnteredDungeon {
+		return player.Player{}, errors.New("player already entered dungeon")
+	}
 
-	p.Floor = 1
+	p.Floor = 0
+	p.EnteredDungeon = true
 	player.Players[cmd.PlayerID] = p
 	return p, nil
 }
@@ -122,13 +142,41 @@ func moveToPrevFloor(cmd event.Command) (p player.Player, err error) {
 	if err != nil {
 		return player.Player{}, err
 	}
-	if !(p.Floor < 1) {
+	if p.Floor <= 0 {
 		p.Floor--
 		player.Players[p.ID] = p
 		return p, nil
 	}
 
 	return p, errors.New("person already on a first level")
+}
+
+func enterBossLevel(cmd event.Command) (player.Player, error) {
+	p, err := findLivePlayer(cmd.PlayerID)
+	if err != nil {
+		return player.Player{}, err
+	}
+	if !p.Dungeon.Floors[p.Floor].IsBoss {
+		return player.Player{}, errors.New("floor isn't boss")
+	}
+	p.Dungeon.BossFloorEntered = true
+	player.Players[p.ID] = p
+
+	return p, nil
+}
+
+func killBoss(cmd event.Command) (p player.Player, err error) {
+	p, err = findLivePlayer(cmd.PlayerID)
+	if err != nil {
+		return player.Player{}, err
+	}
+	if p.Dungeon.Floors[p.Floor].IsBoss && p.Dungeon.BossFloorEntered {
+		p.Status = player.StatusSuccess
+		player.Players[p.ID] = p
+	} else {
+		err = errors.New("floor isn't boss")
+	}
+	return p, err
 }
 
 func heal(cmd event.Command) (p player.Player, err error) {
