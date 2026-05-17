@@ -1,10 +1,14 @@
-# Impulse
+# Dungeon Challenge Event Processor
 
-Impulse is a Go replay tool for a dungeon challenge event stream. It keeps the
-original stdout CLI, and this branch adds a Bubble Tea terminal UI for visual
-replay/debugging of the same core state transitions.
+This repository is a Go prototype for processing a dungeon challenge event
+stream. It reads a JSON configuration, consumes chronological events from
+standard input, updates each player's dungeon run, prints the normalized
+outgoing event log, and emits the final report.
 
-![Impulse Bubble Tea replay](docs/assets/impulse-tui.gif)
+This branch adds a Bubble Tea terminal UI for visual replay/debugging of the
+same core state transitions.
+
+![TUI replay](docs/assets/impulse-tui.gif)
 
 ## Bubble Tea Replay UI
 
@@ -32,7 +36,7 @@ The dungeon panel follows the selected player. Click a row in `Players` to
 inspect that player's run, including total time, average floor clear time, boss
 kill time, floor clear state, monsters left, and time spent on each floor.
 
-![Impulse TUI help](docs/assets/impulse-tui-help.png)
+![TUI help](docs/assets/impulse-tui-help.png)
 
 Controls:
 
@@ -68,14 +72,14 @@ go run . < docs/events
 
 Example output:
 
-![Impulse event replay](docs/assets/impulse-replay.gif)
+![Event replay](docs/assets/impulse-replay.gif)
 
 Build a local binary:
 
 ```bash
-go build -o impulse .
-./impulse docs/config.json < docs/events
-./impulse tui docs/config.json docs/events
+go build -o dungeon .
+./dungeon docs/config.json < docs/events
+./dungeon tui docs/config.json docs/events
 ```
 
 ## What It Models
@@ -163,19 +167,19 @@ stateDiagram-v2
 
 ## Event Reference
 
-| ID | Input meaning | Handler behavior |
-| ---: | --- | --- |
-| 1 | Register player | Creates a player with 100 HP, status `FAIL`, floor `0`, and a dungeon run from config |
-| 2 | Enter dungeon | Requires registration; otherwise emits disqualification |
-| 3 | Kill monster | Decrements monsters on the current non-boss floor and clears it at zero |
-| 4 | Next floor | Requires the current floor to be cleared; entering the boss floor also emits event `6` |
-| 5 | Previous floor | Requires a live player in the dungeon and a floor above `0` |
-| 6 | Enter boss floor | Requires the current floor to be the boss floor; duplicate notifications are ignored |
-| 7 | Kill boss | Requires boss floor entry; marks status `SUCCESS` |
-| 8 | Leave dungeon | Marks the live player as finished |
-| 9 | Cannot continue | Marks player as `DISQUAL` and finished |
-| 10 | Heal | Adds health, capped at `100` |
-| 11 | Damage | Subtracts health; at `0` HP marks status `FAIL` and emits death |
+| ID | Input meaning    | Handler behavior                                                                       |
+|---:|------------------|----------------------------------------------------------------------------------------|
+|  1 | Register player  | Creates a player with 100 HP, status `FAIL`, floor `0`, and a dungeon run from config  |
+|  2 | Enter dungeon    | Requires registration; otherwise emits disqualification                                |
+|  3 | Kill monster     | Decrements monsters on the current non-boss floor and clears it at zero                |
+|  4 | Next floor       | Requires the current floor to be cleared; entering the boss floor also emits event `6` |
+|  5 | Previous floor   | Requires a live player in the dungeon and a floor above `0`                            |
+|  6 | Enter boss floor | Requires the current floor to be the boss floor; duplicate notifications are ignored   |
+|  7 | Kill boss        | Requires boss floor entry; marks status `SUCCESS`                                      |
+|  8 | Leave dungeon    | Marks the live player as finished                                                      |
+|  9 | Cannot continue  | Marks player as `DISQUAL` and finished                                                 |
+| 10 | Heal             | Adds health, capped at `100`                                                           |
+| 11 | Damage           | Subtracts health; at `0` HP marks status `FAIL` and emits death                        |
 
 Invalid floor actions in `4..7` are rejected as:
 
@@ -199,12 +203,12 @@ The binary accepts an optional config path. Without an argument it reads
 }
 ```
 
-| Field | Used by current code |
-| --- | --- |
-| `Floors` | Builds the dungeon, where the last floor is the boss floor |
-| `Monsters` | Sets monster count for each non-boss floor |
-| `OpenAt` | Defines the dungeon opening time used for close-time calculation |
-| `Duration` | Closes active runs at `OpenAt + Duration` hours |
+| Field      | Used by current code                                             |
+|------------|------------------------------------------------------------------|
+| `Floors`   | Builds the dungeon, where the last floor is the boss floor       |
+| `Monsters` | Sets monster count for each non-boss floor                       |
+| `OpenAt`   | Defines the dungeon opening time used for close-time calculation |
+| `Duration` | Closes active runs at `OpenAt + Duration` hours                  |
 
 ## Final Report
 
@@ -221,7 +225,7 @@ it has been cleared is not counted.
 
 ## Test
 
-![Impulse test run](docs/assets/impulse-tests.gif)
+![Test run](docs/assets/impulse-tests.gif)
 
 ```bash
 go test ./...
@@ -242,12 +246,3 @@ docs                 Contract, sample config, sample events
 docs/vhs             VHS tapes and prompt setup for reproducible terminal GIFs
 docs/assets          Generated README GIFs and PNG frames
 ```
-
-## Regenerate Terminal Assets
-
-The terminal animations are generated with
-[Charm VHS](https://github.com/charmbracelet/vhs). VHS records terminal GIFs from
-code-like `.tape` files and requires `vhs`, `ttyd`, and `ffmpeg` on `PATH`.
-The tapes run under `fish` and source [docs/vhs/prompt.fish](docs/vhs/prompt.fish)
-so the recordings keep the Starship prompt visible instead of collapsing to a
-transient prompt.
