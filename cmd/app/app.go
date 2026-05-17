@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"impulse/internal/game"
 	"impulse/internal/handler"
-	"impulse/internal/io"
 	"impulse/internal/parser"
 	"log"
 	"os"
@@ -32,8 +31,6 @@ func Run() {
 	fmt.Printf("%v\n", game.Cfg)
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
-		log.Println("]]]")
-
 		line := scanner.Text()
 
 		cmd, err := parser.Split(line)
@@ -41,8 +38,5 @@ func Run() {
 			log.Println(err)
 		}
 		_, err = handler.HandleCommand(cmd)
-		if err != nil {
-			_ = io.PrintError(err)
-		}
 	}
 }
