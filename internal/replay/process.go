@@ -2,6 +2,7 @@ package replay
 
 import (
 	"encoding/json"
+	"errors"
 	"impulse/internal/event"
 	outfmt "impulse/internal/format"
 	"impulse/internal/game"
@@ -23,8 +24,16 @@ func ResetPlayers() {
 }
 
 func ProcessCommand(cmd event.Command) []string {
+	wasBossFloorEntered := false
+	if p, ok := player.Players[cmd.PlayerID]; ok {
+		wasBossFloorEntered = p.Dungeon.BossFloorEntered
+	}
+
 	p, err := handler.HandleCommand(cmd)
 	if err != nil {
+		if errors.Is(err, handler.ErrNoOutput) {
+			return nil
+		}
 		if cmd.EventID >= 4 && cmd.EventID <= 7 {
 			return []string{outfmt.ImpossibleMove(cmd)}
 		}
@@ -36,6 +45,13 @@ func ProcessCommand(cmd event.Command) []string {
 	}
 
 	lines := []string{outfmt.Command(cmd)}
+	if cmd.EventID == 4 && !wasBossFloorEntered && p.Dungeon.BossFloorEntered {
+		lines = append(lines, outfmt.Command(event.Command{
+			Time:     cmd.Time,
+			PlayerID: cmd.PlayerID,
+			EventID:  6,
+		}))
+	}
 	if cmd.EventID == 11 && p.Health == 0 {
 		lines = append(lines, outfmt.Dead(cmd))
 	}

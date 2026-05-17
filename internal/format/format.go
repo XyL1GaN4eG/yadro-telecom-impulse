@@ -3,6 +3,9 @@ package format
 import (
 	"fmt"
 	"impulse/internal/event"
+	"impulse/internal/player"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -48,9 +51,52 @@ func ImpossibleMove(cmd event.Command) string {
 }
 
 func Time(d time.Duration) string {
+	return fmt.Sprintf("[%s]", Duration(d))
+}
+
+func Duration(d time.Duration) string {
 	total := int(d.Seconds())
 	h := total / 3600
 	m := total % 3600 / 60
 	s := total % 60
-	return fmt.Sprintf("[%02d:%02d:%02d]", h, m, s)
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+}
+
+func FinalReport(players map[uint8]player.Player) string {
+	ids := make([]int, 0, len(players))
+	for id := range players {
+		ids = append(ids, int(id))
+	}
+	sort.Ints(ids)
+
+	lines := make([]string, 0, len(players)+1)
+	lines = append(lines, "Final report:")
+	for _, id := range ids {
+		lines = append(lines, Report(players[uint8(id)]))
+	}
+
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func Report(p player.Player) string {
+	return fmt.Sprintf(
+		"[%s] %d [%s, %s, %s] HP:%d",
+		Status(p.Status),
+		p.ID,
+		Duration(p.TotalTime()),
+		Duration(p.AverageFloorClearTime()),
+		Duration(p.Dungeon.BossKillTime),
+		p.Health,
+	)
+}
+
+func Status(status player.Status) string {
+	switch status {
+	case player.StatusSuccess:
+		return "SUCCESS"
+	case player.StatusDisqual:
+		return "DISQUAL"
+	default:
+		return "FAIL"
+	}
 }

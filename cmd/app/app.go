@@ -3,7 +3,11 @@ package app
 import (
 	"bufio"
 	"fmt"
+	outfmt "impulse/internal/format"
+	"impulse/internal/game"
+	"impulse/internal/handler"
 	"impulse/internal/parser"
+	"impulse/internal/player"
 	"impulse/internal/replay"
 	"impulse/internal/tui"
 	"log"
@@ -28,8 +32,14 @@ func Run() {
 	if err := replay.LoadConfig(path); err != nil {
 		log.Panic(err)
 	}
+	closeAt, err := game.CloseDuration()
+	if err != nil {
+		log.Panic(err)
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
+	var lastEventTime int64 = -1
+	closed := false
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -38,9 +48,26 @@ func Run() {
 			log.Println(err)
 			continue
 		}
+		if lastEventTime > int64(cmd.Time) {
+			log.Println("events must be sequential in time")
+			continue
+		}
+		lastEventTime = int64(cmd.Time)
+
+		if !closed && cmd.Time >= closeAt {
+			handler.CloseActivePlayers(closeAt)
+			closed = true
+		}
+		if closed {
+			continue
+		}
 
 		for _, line := range replay.ProcessCommand(cmd) {
 			fmt.Println(line)
 		}
+	}
+	handler.CloseActivePlayers(closeAt)
+	if len(player.Players) > 0 {
+		fmt.Print(outfmt.FinalReport(player.Players))
 	}
 }
