@@ -40,7 +40,7 @@ func Run() {
 		if err != nil {
 			log.Println(err)
 		}
-		_, _ = handler.HandleCommand(cmd)
+		_, err = handler.HandleCommand(cmd)
 		if err != nil {
 			_ = io.PrintError(err)
 		}

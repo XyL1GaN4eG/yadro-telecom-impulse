@@ -20,9 +20,24 @@ func HandleCommand(cmd event.Command) (p player.Player, err error) {
 		log.Printf("Игрок %v зарегистрирован\n", p.ID)
 	case 2:
 		_, err = enterToDungeon(cmd)
+		if err != nil {
+		}
+		log.Printf("Игрок %v вошел в подземелье", p.ID)
 	case 3:
 		_, err = killEnemy(cmd)
+		log.Printf("Игрок %v убил монстра", p.ID)
 	case 4:
+		log.Printf("Игрок %v перешел на следующий этаж", p.ID)
+	case 5:
+		log.Printf("Игрок %v перешел на предыдущий этаж", p.ID)
+	case 6:
+		log.Printf("Игрок %v вошел на этаж босса", p.ID)
+	case 7:
+		log.Printf("Игрок %v убил босса", p.ID)
+	case 8:
+		log.Printf("Игрок %v покинул подземелье", p.ID)
+	case 9:
+		log.Printf("Игрок %v не может продолжать из-за [%s]", p.ID, cmd.Arg)
 	case 10:
 		_, err = heal(cmd)
 	case 11:
