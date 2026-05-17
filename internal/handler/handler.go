@@ -6,13 +6,18 @@ import (
 	"impulse/internal/game"
 	"impulse/internal/parser"
 	"impulse/internal/player"
+	"log"
 	"strconv"
 )
 
-func HandleCommand(cmd event.Command) (err error) {
+func HandleCommand(cmd event.Command) (p player.Player, err error) {
 	switch cmd.EventID {
 	case 1:
-		_, err = registerPlayer(cmd)
+		p, err = registerPlayer(cmd)
+		if err != nil {
+			log.Println(err)
+		}
+		log.Printf("Игрок %v зарегистрирован\n", p.ID)
 	case 2:
 		_, err = enterToDungeon(cmd)
 	case 3:

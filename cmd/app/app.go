@@ -8,36 +8,41 @@ import (
 	"impulse/internal/handler"
 	"impulse/internal/io"
 	"impulse/internal/parser"
+	"log"
 	"os"
-	"time"
 )
 
 func Run() {
-	data, err := os.ReadFile("config.json")
+	args := os.Args[1:]
+	var path string
+	if len(args) != 0 {
+		path = args[0]
+	} else {
+		path = "docs/config.json"
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
+		log.Panic(err)
 	}
 	if err := json.Unmarshal(data, &game.Cfg); err != nil {
 		panic("Error parsing JSON:" + string(err.Error()))
 		return
 	}
 
-	for {
-		now := time.Now()
-		timeStr := now.Format("2006-01-02 15:04:05")
+	fmt.Printf("%v\n", game.Cfg)
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		log.Println("]]]")
 
-		fmt.Printf("[%v]", timeStr)
+		line := scanner.Text()
 
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			line := scanner.Text()
-			cmd, err := parser.Split(line)
-			if err != nil {
-			}
-			err = handler.HandleCommand(cmd)
-			if err != nil {
-				_ = io.PrintError(err)
-			}
+		cmd, err := parser.Split(line)
+		if err != nil {
+			log.Println(err)
 		}
-
+		_, _ = handler.HandleCommand(cmd)
+		if err != nil {
+			_ = io.PrintError(err)
+		}
 	}
 }

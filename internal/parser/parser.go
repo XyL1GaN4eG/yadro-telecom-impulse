@@ -41,11 +41,9 @@ func Split(line string) (cmd event.Command, err error) {
 			cmd.EventID = 0
 			err = errors.New("incorrect arg for Command=" + strconv.Itoa(int(cmd.EventID)))
 		}
-		goto end
 	}
-	return event.Command{}, errors.New("failed to parse line=" + line)
 end:
-	return cmd, nil
+	return cmd, err
 }
 
 func StrToUint8(s string) (arg uint8, err error) {
