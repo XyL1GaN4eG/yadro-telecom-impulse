@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"io"
-	"log"
 	"testing"
 
 	"impulse/internal/event"
@@ -108,7 +106,6 @@ func TestReadmeDisqualifiesUnregisteredPlayer(t *testing.T) {
 func resetState(t *testing.T) {
 	t.Helper()
 
-	log.SetOutput(io.Discard)
 	player.Players = make(map[uint8]player.Player)
 	game.Cfg = game.Config{
 		Floors:   2,
