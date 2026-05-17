@@ -103,6 +103,11 @@ func moveToNextFloor(cmd event.Command) (p player.Player, err error) {
 	if err != nil {
 		return player.Player{}, err
 	}
+
+	if !p.Dungeon.Floors[p.Floor].Cleared {
+		err = errors.New("floor isn't cleared")
+		return player.Player{}, err
+	}
 	if p.Floor < uint8(len(p.Dungeon.Floors)) {
 		p.Floor++
 		player.Players[p.ID] = p
