@@ -6,6 +6,7 @@ import (
 	"impulse/internal/event"
 	"impulse/internal/format"
 	"impulse/internal/game"
+	"impulse/internal/handler"
 	"impulse/internal/parser"
 	"impulse/internal/player"
 	"impulse/internal/replay"
@@ -14,8 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 const tickEvery = 500 * time.Millisecond
@@ -27,14 +31,23 @@ type Entry struct {
 }
 
 type Model struct {
-	Entries  []Entry
-	Index    int
-	Log      []string
-	Playing  bool
-	LastErr  string
-	Width    int
-	Height   int
-	activeID uint8
+	Entries    []Entry
+	Index      int
+	Log        []string
+	Playing    bool
+	LastErr    string
+	ShowHelp   bool
+	Width      int
+	Height     int
+	CloseAt    time.Duration
+	Closed     bool
+	Reported   bool
+	lastTime   int64
+	activeID   uint8
+	selectedID uint8
+	keys       keyMap
+	help       help.Model
+	zoneID     string
 }
 
 type tickMsg time.Time
@@ -57,10 +70,13 @@ func Run(args []string) error {
 		return err
 	}
 	replay.ResetPlayers()
+	zone.NewGlobal()
+	defer zone.Close()
 
 	_, err = tea.NewProgram(
 		NewModel(entries),
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 		tea.WithInput(os.Stdin),
 		tea.WithOutput(os.Stdout),
 	).Run()
@@ -72,7 +88,9 @@ func LoadEvents(path string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	var entries []Entry
 	scanner := bufio.NewScanner(file)
@@ -88,15 +106,81 @@ func LoadEvents(path string) ([]Entry, error) {
 }
 
 func NewModel(entries []Entry) Model {
+	zone.NewGlobal()
+	helpModel := help.New()
+	helpModel.ShowAll = true
+	closeAt, _ := game.CloseDuration()
 	return Model{
-		Entries: entries,
-		Width:   100,
-		Height:  32,
+		Entries:  entries,
+		Width:    100,
+		Height:   32,
+		CloseAt:  closeAt,
+		lastTime: -1,
+		keys:     defaultKeys,
+		help:     helpModel,
+		zoneID:   zone.NewPrefix(),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+type keyMap struct {
+	Forward key.Binding
+	Back    key.Binding
+	Play    key.Binding
+	Reset   key.Binding
+	End     key.Binding
+	Help    key.Binding
+	Quit    key.Binding
+	Mouse   key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Forward, k.Back, k.Play, k.Help, k.Quit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Forward, k.Back, k.Play, k.Reset, k.End},
+		{k.Help, k.Quit, k.Mouse},
+	}
+}
+
+var defaultKeys = keyMap{
+	Forward: key.NewBinding(
+		key.WithKeys("l", "k", "right"),
+		key.WithHelp("l/k", "step forward"),
+	),
+	Back: key.NewBinding(
+		key.WithKeys("h", "j", "left"),
+		key.WithHelp("h/j", "step back"),
+	),
+	Play: key.NewBinding(
+		key.WithKeys(" "),
+		key.WithHelp("space", "play/pause"),
+	),
+	Reset: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "reset"),
+	),
+	End: key.NewBinding(
+		key.WithKeys("g", "G"),
+		key.WithHelp("g", "to end"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "help"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("q", "ctrl+c"),
+		key.WithHelp("q", "quit"),
+	),
+	Mouse: key.NewBinding(
+		key.WithKeys("click"),
+		key.WithHelp("click", "select player"),
+	),
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -108,19 +192,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case " ":
+		case "?":
+			m.ShowHelp = !m.ShowHelp
+			return m, nil
+		case "esc":
+			m.ShowHelp = false
+			return m, nil
+		}
+		if m.ShowHelp {
+			return m, nil
+		}
+		switch {
+		case key.Matches(msg, m.keys.Play):
 			m.Playing = !m.Playing
 			if m.Playing {
 				return m, tick()
 			}
-		case "right", "n":
+		case key.Matches(msg, m.keys.Forward):
 			m.Step()
-		case "left", "p":
+		case key.Matches(msg, m.keys.Back):
 			m.StepBack()
-		case "r":
+		case key.Matches(msg, m.keys.Reset):
 			m.Reset()
-		case "g":
+		case key.Matches(msg, m.keys.End):
 			m.PlayToEnd()
+		}
+	case tea.MouseMsg:
+		if m.ShowHelp || msg.Action != tea.MouseActionRelease || msg.Button != tea.MouseButtonLeft {
+			return m, nil
+		}
+		for _, id := range playerIDs() {
+			z := zone.Get(m.playerZone(id))
+			if z != nil && z.InBounds(msg) {
+				m.selectedID = id
+				m.activeID = id
+				return m, nil
+			}
 		}
 	case tickMsg:
 		if m.Playing {
@@ -154,14 +261,39 @@ func (m *Model) Step() bool {
 		m.Index++
 		return true
 	}
+	if m.lastTime > int64(entry.Cmd.Time) {
+		m.LastErr = "events must be sequential in time"
+		m.Log = append(m.Log, fmt.Sprintf("parse error at step %d: events must be sequential in time", m.Index+1))
+		m.Index++
+		return true
+	}
+	m.lastTime = int64(entry.Cmd.Time)
+	if !m.Closed && m.CloseAt > 0 && entry.Cmd.Time >= m.CloseAt {
+		handler.CloseActivePlayers(m.CloseAt)
+		m.Closed = true
+		m.appendFinalReport()
+		m.Index = len(m.Entries)
+		m.Playing = false
+		return true
+	}
+	if m.Closed {
+		m.Index++
+		return true
+	}
 
 	m.activeID = entry.Cmd.PlayerID
+	if m.selectedID == 0 {
+		m.selectedID = entry.Cmd.PlayerID
+	}
 	lines := replay.ProcessCommand(entry.Cmd)
 	if len(lines) == 0 {
 		m.LastErr = "event ignored"
 	}
 	m.Log = append(m.Log, lines...)
 	m.Index++
+	if m.Index >= len(m.Entries) {
+		m.closeAtEnd()
+	}
 	return true
 }
 
@@ -188,27 +320,49 @@ func (m *Model) replayTo(target int) {
 	m.Log = nil
 	m.LastErr = ""
 	m.activeID = 0
+	m.Closed = false
+	m.Reported = false
+	m.lastTime = -1
 	m.Playing = false
 	for m.Index < target {
 		m.Step()
 	}
 }
 
+func (m *Model) closeAtEnd() {
+	if !m.Closed && m.CloseAt > 0 {
+		handler.CloseActivePlayers(m.CloseAt)
+		m.Closed = true
+	}
+	m.appendFinalReport()
+}
+
+func (m *Model) appendFinalReport() {
+	if m.Reported || len(player.Players) == 0 {
+		return
+	}
+	m.Log = append(m.Log, strings.Split(strings.TrimSuffix(format.FinalReport(player.Players), "\n"), "\n")...)
+	m.Reported = true
+}
+
 func (m Model) View() string {
 	width := max(m.Width, 80)
 	height := max(m.Height, 24)
+	if m.ShowHelp {
+		return m.helpView(width, height)
+	}
 	panelHeight := max(height-9, 10)
 	timelineWidth := clamp(width/4, 24, 36)
-	playersWidth := clamp(width/4, 26, 38)
+	playersWidth := clamp(width/3, 30, 44)
 	centerWidth := max(width-timelineWidth-playersWidth-4, 24)
 	logHeight := max(height-panelHeight-4, 5)
 
 	top := headerStyle.Width(width).Render(m.header())
 	timeline := panelStyle.Width(timelineWidth).Height(panelHeight).Render(m.timelineView(panelHeight))
-	dungeon := panelStyle.Width(centerWidth).Height(panelHeight).Render(m.dungeonView(panelHeight))
-	players := panelStyle.Width(playersWidth).Height(panelHeight).Render(m.playersView(panelHeight))
+	dungeon := panelStyle.Width(centerWidth).Height(panelHeight).Render(m.dungeonView(centerWidth, panelHeight))
+	players := playersPanelStyle.Width(playersWidth).Height(panelHeight).Render(m.playersView(panelHeight))
 	log := logStyle.Width(width).Height(logHeight).Render(m.logView(logHeight))
-	return lipgloss.JoinVertical(lipgloss.Left, top, lipgloss.JoinHorizontal(lipgloss.Top, timeline, dungeon, players), log)
+	return zone.Scan(lipgloss.JoinVertical(lipgloss.Left, top, lipgloss.JoinHorizontal(lipgloss.Top, timeline, dungeon, players), log))
 }
 
 func (m Model) header() string {
@@ -221,16 +375,29 @@ func (m Model) header() string {
 		errText = " | last: " + m.LastErr
 	}
 	return fmt.Sprintf(
-		"Floors %d | Monsters %d | Open %s | Duration %dh | Step %d/%d | %s%s",
+		"Floors %d | Monsters %d | Open %s | Close %s | Step %d/%d | %s | ? help%s",
 		game.Cfg.Floors,
 		game.Cfg.Monsters,
 		game.Cfg.OpenAt,
-		game.Cfg.Duration,
+		format.Duration(m.CloseAt),
 		m.Index,
 		len(m.Entries),
 		mode,
 		errText,
 	)
+}
+
+func (m Model) helpView(width, height int) string {
+	body := lipgloss.JoinVertical(
+		lipgloss.Left,
+		titleStyle.Render("Replay controls"),
+		"",
+		m.help.View(m.keys),
+		"",
+		mutedStyle.Render("Click a player row to inspect that player's dungeon path."),
+	)
+	help := helpStyle.Width(clamp(width-12, 36, 56)).Render(body)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, help)
 }
 
 func (m Model) timelineView(height int) string {
@@ -269,44 +436,152 @@ func (m Model) eventLabel(entry Entry) string {
 	return fmt.Sprintf("%s P%d E%d", format.Time(entry.Cmd.Time), entry.Cmd.PlayerID, entry.Cmd.EventID)
 }
 
-func (m Model) dungeonView(height int) string {
+func (m Model) dungeonView(width, height int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Dungeon"))
 	b.WriteByte('\n')
-	p, ok := m.activePlayer()
-	if !ok {
-		b.WriteString("No active player yet")
-		return b.String()
+	contentWidth := clamp(width-6, 22, 44)
+	selected, hasSelected := m.selectedPlayer()
+	if hasSelected {
+		fmt.Fprintf(&b, "Inspect P%d | HP %d | %s\n", selected.ID, selected.Health, statusLabel(selected.Status))
+		fmt.Fprintf(&b, "Run %s | Avg %s | Boss %s\n", format.Duration(selected.TotalTime()), format.Duration(selected.AverageFloorClearTime()), format.Duration(selected.Dungeon.BossKillTime))
+	} else if m.selectedID != 0 {
+		fmt.Fprintf(&b, "Inspect P%d | not registered here\n", m.selectedID)
+	} else {
+		b.WriteString("Inspect: click a player row\n")
 	}
-	b.WriteString(fmt.Sprintf("Player %d | HP %d | %s\n\n", p.ID, p.Health, statusLabel(p.Status)))
-	limit := max(height-5, 1)
-	for i, floor := range p.Dungeon.Floors {
-		if i >= limit {
-			b.WriteString("...")
-			break
+	b.WriteString("Map: START > F... > BOSS > EXIT\n")
+	b.WriteByte('\n')
+
+	rooms := make([][]string, 0, int(game.Cfg.Floors)+2)
+	startPlayers := m.playersAtStart()
+	rooms = append(rooms, dungeonSpecialRoom("START", startPlayers, contentWidth, strings.Contains(startPlayers, "[@")))
+	for i, floor := range m.mapFloors(selected, hasSelected) {
+		rooms = append(rooms, dungeonRoom(m, floor, uint8(i), contentWidth, hasSelected))
+	}
+	exitPlayers := m.playersAtExit()
+	rooms = append(rooms, dungeonSpecialRoom("EXIT", exitPlayers, contentWidth, strings.Contains(exitPlayers, "[@")))
+
+	for i, lines := range rooms {
+		for _, line := range lines {
+			b.WriteString(line)
+			b.WriteByte('\n')
 		}
-		marker := " "
-		if uint8(i) == p.Floor {
-			marker = ">"
-		}
-		kind := "floor"
-		if floor.IsBoss {
-			kind = "boss"
-		}
-		cleared := "open"
-		if floor.Cleared {
-			cleared = "cleared"
-		}
-		line := fmt.Sprintf("%s %02d %-5s monsters:%d %s", marker, i, kind, floor.MonstersLeft, cleared)
-		if uint8(i) == p.Floor {
-			line = currentStyle.Render(line)
-		}
-		b.WriteString(line)
-		if i < len(p.Dungeon.Floors)-1 {
+		if i < len(rooms)-1 {
+			connector := centerASCII("||", contentWidth)
+			b.WriteString(connector)
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
+}
+
+func (m Model) mapFloors(selected player.Player, hasSelected bool) []player.Floor {
+	if hasSelected {
+		return selected.Dungeon.Floors
+	}
+	return player.New(0, game.Cfg.Floors, game.Cfg.Monsters).Dungeon.Floors
+}
+
+func dungeonRoom(m Model, floor player.Floor, floorID uint8, width int, hasSelected bool) []string {
+	innerWidth := width - 2
+	if innerWidth < 18 {
+		innerWidth = 18
+	}
+	border := "+" + strings.Repeat("-", innerWidth) + "+"
+	roomType := "FLOOR"
+	threat := monstersASCII(floor.MonstersLeft)
+	if floor.IsBoss {
+		roomType = "BOSS"
+		threat = "BOSS"
+	}
+	cleared := "open"
+	if floor.Cleared {
+		cleared = "cleared"
+	}
+
+	prefix := " "
+	if hasSelected && m.selectedID != 0 {
+		if selected, ok := player.Players[m.selectedID]; ok && selected.EnteredDungeon && !selected.Finished && selected.Floor == floorID {
+			prefix = fmt.Sprintf("@P%d", selected.ID)
+		}
+	}
+	playersHere := m.playersOnFloor(floorID)
+
+	lines := []string{
+		border,
+		asciiLine(fmt.Sprintf("%s %02d %-5s %s", prefix, floorID, roomType, cleared), innerWidth),
+		asciiLine(fmt.Sprintf("%s T:%s P:%s", threat, format.Duration(floor.TimeSpent), playersHere), innerWidth),
+		border,
+	}
+	if floor.IsBoss {
+		lines = styleRoom(lines, bossStyle)
+	} else if floor.Cleared {
+		lines = styleRoom(lines, clearedStyle)
+	}
+	if hasSelected && prefix != " " {
+		lines = styleRoom(lines, selectedRoomStyle)
+	}
+	return lines
+}
+
+func dungeonSpecialRoom(label, players string, width int, highlighted bool) []string {
+	innerWidth := width - 2
+	if innerWidth < 18 {
+		innerWidth = 18
+	}
+	border := "+" + strings.Repeat("=", innerWidth) + "+"
+	lines := []string{
+		border,
+		asciiLine(fmt.Sprintf("%s | players:%s", label, players), innerWidth),
+		border,
+	}
+	if highlighted {
+		return styleRoom(lines, selectedRoomStyle)
+	}
+	return lines
+}
+
+func styleRoom(lines []string, style lipgloss.Style) []string {
+	styled := make([]string, len(lines))
+	for i, line := range lines {
+		styled[i] = style.Render(line)
+	}
+	return styled
+}
+
+func monstersASCII(monstersLeft uint8) string {
+	if monstersLeft == 0 {
+		return "M:clear"
+	}
+	visible := min(int(monstersLeft), 8)
+	monsters := strings.Repeat("M", visible)
+	if int(monstersLeft) > visible {
+		monsters += "+"
+	}
+	return "M:" + monsters
+}
+
+func asciiLine(text string, width int) string {
+	return "|" + padASCII(text, width) + "|"
+}
+
+func padASCII(text string, width int) string {
+	if len(text) > width {
+		if width <= 1 {
+			return text[:width]
+		}
+		return text[:width-1] + "~"
+	}
+	return text + strings.Repeat(" ", width-len(text))
+}
+
+func centerASCII(text string, width int) string {
+	if len(text) >= width {
+		return text
+	}
+	left := (width - len(text)) / 2
+	return strings.Repeat(" ", left) + text
 }
 
 func (m Model) playersView(height int) string {
@@ -315,27 +590,36 @@ func (m Model) playersView(height int) string {
 	b.WriteByte('\n')
 	ids := playerIDs()
 	if len(ids) == 0 {
-		b.WriteString("No players")
+		b.WriteString(mutedStyle.Render("No players yet"))
 		return b.String()
 	}
-	b.WriteString("ID  HP  Status    Fl  In  Done\n")
-	limit := max(height-3, 1)
+	b.WriteString(mutedStyle.Render("click a row to inspect"))
+	b.WriteByte('\n')
+	b.WriteString("ID HP  St  Fl In Dn\n")
+	limit := max(height-4, 1)
 	for i, id := range ids {
 		if i >= limit {
 			b.WriteString("...")
 			break
 		}
 		p := player.Players[id]
-		line := fmt.Sprintf("%-3d %-3d %-9s %-3d %-3t %-4t", p.ID, p.Health, statusLabel(p.Status), p.Floor, p.EnteredDungeon, p.Finished)
-		if p.ID == m.activeID {
+		line := fmt.Sprintf("%-2d %-3d %-3s %-2d %-2s %-2s", p.ID, p.Health, shortStatus(p.Status), p.Floor, boolLabel(p.EnteredDungeon), boolLabel(p.Finished))
+		switch p.ID {
+		case m.selectedID:
+			line = selectedPlayerStyle.Render(line)
+		case m.activeID:
 			line = currentStyle.Render(line)
 		}
-		b.WriteString(line)
+		b.WriteString(zone.Mark(m.playerZone(id), line))
 		if i < len(ids)-1 {
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
+}
+
+func (m Model) playerZone(id uint8) string {
+	return fmt.Sprintf("%splayer-%d", m.zoneID, id)
 }
 
 func (m Model) logView(height int) string {
@@ -354,6 +638,11 @@ func (m Model) logView(height int) string {
 }
 
 func (m Model) activePlayer() (player.Player, bool) {
+	if m.selectedID != 0 {
+		if p, ok := player.Players[m.selectedID]; ok {
+			return p, true
+		}
+	}
 	if m.activeID != 0 {
 		if p, ok := player.Players[m.activeID]; ok {
 			return p, true
@@ -364,6 +653,62 @@ func (m Model) activePlayer() (player.Player, bool) {
 		return player.Player{}, false
 	}
 	return player.Players[ids[0]], true
+}
+
+func (m Model) selectedPlayer() (player.Player, bool) {
+	if m.selectedID != 0 {
+		p, ok := player.Players[m.selectedID]
+		return p, ok
+	}
+	return m.activePlayer()
+}
+
+func (m Model) playersAtStart() string {
+	var ids []uint8
+	for _, id := range playerIDs() {
+		p := player.Players[id]
+		if !p.EnteredDungeon && !p.Finished {
+			ids = append(ids, id)
+		}
+	}
+	return playerMarkers(ids, m.selectedID)
+}
+
+func (m Model) playersAtExit() string {
+	var ids []uint8
+	for _, id := range playerIDs() {
+		p := player.Players[id]
+		if p.Finished {
+			ids = append(ids, id)
+		}
+	}
+	return playerMarkers(ids, m.selectedID)
+}
+
+func (m Model) playersOnFloor(floorID uint8) string {
+	var ids []uint8
+	for _, id := range playerIDs() {
+		p := player.Players[id]
+		if p.EnteredDungeon && !p.Finished && p.Floor == floorID {
+			ids = append(ids, id)
+		}
+	}
+	return playerMarkers(ids, m.selectedID)
+}
+
+func playerMarkers(ids []uint8, selectedID uint8) string {
+	if len(ids) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == selectedID {
+			parts = append(parts, fmt.Sprintf("[@%d]", id))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("@%d", id))
+	}
+	return strings.Join(parts, " ")
 }
 
 func playerIDs() []uint8 {
@@ -386,6 +731,26 @@ func statusLabel(status player.Status) string {
 	default:
 		return "unknown"
 	}
+}
+
+func shortStatus(status player.Status) string {
+	switch status {
+	case player.StatusSuccess:
+		return "ok"
+	case player.StatusFail:
+		return "bad"
+	case player.StatusDisqual:
+		return "dq"
+	default:
+		return "?"
+	}
+}
+
+func boolLabel(v bool) string {
+	if v {
+		return "y"
+	}
+	return "-"
 }
 
 func clamp(v, low, high int) int {
@@ -415,6 +780,10 @@ var (
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("240")).
 			Padding(0, 1)
+	playersPanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Padding(0, 2, 0, 1)
 	logStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("244")).
@@ -422,9 +791,31 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("39")).
 			Bold(true)
+	mutedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245")).
+			Italic(true)
 	currentStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("230")).
 			Background(lipgloss.Color("25"))
+	selectedPlayerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("230")).
+				Background(lipgloss.Color("63")).
+				Bold(true)
+	selectedRoomStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("230")).
+				Background(lipgloss.Color("24")).
+				Bold(true)
+	bossStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("204")).
+			Bold(true)
+	clearedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("78"))
 	doneStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245"))
+	helpStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("39")).
+			Foreground(lipgloss.Color("230")).
+			Background(lipgloss.Color("236")).
+			Padding(1, 2)
 )
