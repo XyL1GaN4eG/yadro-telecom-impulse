@@ -6,7 +6,6 @@ import (
 	"impulse/internal/game"
 	"impulse/internal/parser"
 	"impulse/internal/player"
-	"log"
 	"strconv"
 )
 
@@ -14,64 +13,28 @@ func HandleCommand(cmd event.Command) (p player.Player, err error) {
 	switch cmd.EventID {
 	case 1:
 		p, err = registerPlayer(cmd)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("Игрок %v зарегистрирован\n", p.ID)
-		}
 	case 2:
 		p, err = enterToDungeon(cmd)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("Игрок %v вошел в подземелье", p.ID)
-		}
 	case 3:
 		p, err = killEnemy(cmd)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("Игрок %v убил монстра", p.ID)
-		}
 	case 4:
 		p, err = moveToNextFloor(cmd)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("Игрок %v перешел на следующий этаж", p.ID)
-		}
 	case 5:
 		p, err = moveToPrevFloor(cmd)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("Игрок %v перешел на предыдущий этаж", p.ID)
-		}
 	case 6:
 		p, err = enterBossLevel(cmd)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("Игрок %v вошел на этаж босса", p.ID)
-		}
-
 	case 7:
-		p, err := killBoss(cmd)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("Игрок %v убил босса", p.ID)
-		}
+		p, err = killBoss(cmd)
 	case 8:
 		p, err = leaveDungeon(cmd)
 	case 9:
 		p, err = cannotContinue(cmd)
 	case 10:
-		_, err = heal(cmd)
+		p, err = heal(cmd)
 	case 11:
-		_, err = damage(cmd)
+		p, err = damage(cmd)
 	case 33:
-		_, err = killPlayer(cmd)
+		p, err = killPlayer(cmd)
 	default:
 		err = errors.New("unknown event")
 	}
